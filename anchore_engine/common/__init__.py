@@ -6,7 +6,11 @@ repository_subscription_types = ["repo_update"]
 
 tag_subscription_types = ["policy_eval", "tag_update", "vuln_update", "analysis_update"]
 
-subscription_types = repository_subscription_types + tag_subscription_types
+
+# converting this into a function to support extensibility
+@property
+def subscription_types():
+    return list(set(repository_subscription_types + tag_subscription_types))
 
 
 resource_types = [

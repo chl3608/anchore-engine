@@ -677,6 +677,7 @@ def handle_repo_watcher(*args, **kwargs):
 
             try:
                 regrepo = subscription_record["subscription_key"]
+
                 if subscription_record["subscription_value"]:
                     subscription_value = json.loads(
                         subscription_record["subscription_value"]
@@ -713,9 +714,37 @@ def handle_repo_watcher(*args, **kwargs):
                     )
                     raise e
 
-                autosubscribes = ["analysis_update"]
+                all_subs = ["analysis_update"]
                 if subscription_value["autosubscribe"]:
-                    autosubscribes.append("tag_update")
+                    all_subs.append("tag_update")
+
+                try:
+                    # subscription types may apply to repos and tags, in which case repo level subscription means that every tag inherits it too
+                    # this could change between tags and should probably be queried before adding the tag one last time. But tag_update suffers similar issue, so leaving it here for now
+                    with db.session_scope() as dbsession:
+                        repo_subs_filter = {
+                            "subscription_key": regrepo,
+                        }
+                        repo_subs = db_subscriptions.get_byfilter(
+                            userId, session=dbsession, **repo_subs_filter
+                        )
+                        for repo_sub in repo_subs:
+                            if (
+                                repo_sub["subscription_type"]
+                                in anchore_engine.common.tag_subscription_types
+                                and repo_sub["active"]
+                            ):
+                                logger.debug(
+                                    "Found %s subscription enabled for repository %",
+                                    repo_sub["subscription_type"],
+                                    regrepo,
+                                )
+                                all_subs.append(repo_sub["subscription_type"])
+                except Exception:
+                    logger.debug_exception(
+                        "Ignoring error looking up subscriptions for repository %s",
+                        regrepo,
+                    )
 
                 repotags = set(curr_repotags).difference(set(stored_repotags))
                 if repotags:
@@ -829,11 +858,12 @@ def handle_repo_watcher(*args, **kwargs):
                                 )
                                 # add the subscription records with the configured default activations
 
-                                for stype in anchore_engine.common.subscription_types:
+                                logger.debug("Activating subscriptions: %s", all_subs)
+                                for (
+                                    stype
+                                ) in anchore_engine.common.tag_subscription_types:
                                     activate = False
-                                    if stype == "repo_update":
-                                        continue
-                                    elif stype in autosubscribes:
+                                    if stype in all_subs:
                                         activate = True
                                     db_subscriptions.add(
                                         userId,
